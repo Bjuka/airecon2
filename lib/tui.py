@@ -419,5 +419,19 @@ def main_menu():
             return
         if not c:
             continue
-        if not dispatch(c):
+        try:
+            handled = dispatch(c)
+        except SystemExit:
+            raise
+        except KeyboardInterrupt:
+            err("interrupted")
+            show_banner()
+            continue
+        except Exception as e:
+            # a REPL must never die on one bad command - report and return to prompt
+            err(f"{type(e).__name__}: {e}")
+            warn("command failed - you are still in the console (help lists commands)")
+            show_banner()
+            continue
+        if not handled:
             warn(f"unknown: {c}   (help shows commands)")

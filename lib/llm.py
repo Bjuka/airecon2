@@ -1,6 +1,7 @@
 #airecon2 - universal OpenAI-compatible chat client via urllib (no dependencies).
 #Works with: OpenAI, Gemini, OpenRouter, Groq, Mistral, DeepSeek, Together, xAI,
 #LM Studio, Ollama, and ANY custom OpenAI-compatible endpoint.
+import http.client
 import json
 import urllib.request
 import urllib.error
@@ -16,7 +17,8 @@ def _is_transient(err_str: str) -> bool:
     s = err_str.lower()
     return ("429" in s or "503" in s or "529" in s or "quota" in s
             or "high demand" in s or "overloaded" in s or "rate limit" in s
-            or "capacity" in s)
+            or "capacity" in s or "connection" in s or "reset" in s
+            or "remote closed" in s or "timed out" in s or "timeout" in s)
 
 
 class LLM:
@@ -54,12 +56,21 @@ class LLM:
             f"{self.base_url}{path}", data=body, headers=self._headers(), method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8")
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")[:500]
             raise LLMError(f"HTTP {e.code} from {self.provider}: {detail}") from e
         except (urllib.error.URLError, TimeoutError) as e:
             raise LLMError(f"{self.provider} unreachable: {e}") from e
+        except (http.client.RemoteDisconnected, http.client.BadStatusLine,
+                ConnectionError, OSError) as e:
+            # RemoteDisconnected escapes urlopen unwrapped - it is a ConnectionError,
+            # not a URLError, so it must be caught explicitly (it slips past URLError).
+            raise LLMError(f"{self.provider} dropped the connection (remote closed without response)") from e
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise LLMError(f"{self.provider} sent a malformed response: {raw[:200]}") from e
 
     # ------------------------------------------------------------ discovery
     def list_models(self) -> list:
@@ -92,19 +103,28 @@ class LLM:
 
     # ---------------------------------------------------------------- public
     def chat(self, messages: list, tools: list | None = None) -> dict:
-        """Assistant message dict; walks a fallback chain on transient errors."""
+        """Assistant message dict; walks a fallback chain on transient errors,
+        then retries the final model once (covers single-model providers)."""
         import time
         chain = self._model_chain()
         if not chain:
             raise LLMError(f"no model available for '{self.provider}' - set one in Settings")
         last_err: Exception | None = None
-        for i, model in enumerate(chain):
+        i, retries = 0, 0
+        while i < len(chain):
             try:
-                return self._chat_once(messages, tools, model)
+                return self._chat_once(messages, tools, chain[i])
             except LLMError as e:
                 last_err = e
-                if _is_transient(str(e)) and i < len(chain) - 1:
+                if not _is_transient(str(e)):
+                    raise
+                if i < len(chain) - 1:
                     time.sleep(min(2 * (i + 1), 8))
+                    i += 1
+                    continue
+                if retries < 2:   # last model: up to 2 extra tries (blips come in pairs)
+                    retries += 1
+                    time.sleep(5)
                     continue
                 raise
         raise last_err or LLMError("all models failed")
