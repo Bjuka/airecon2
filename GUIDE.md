@@ -178,9 +178,7 @@ to `workspace/audit.log`.
 4. **Audit log** - `workspace/audit.log` is the raw chronology:
 
 ```
-2026-09-14T13:14:07 [AUTHZ] love-bjuka1.vercel.app allowed by rule '*'
-2026-09-14T13:14:07 [DIRBUSTER] love-bjuka1.vercel.app
-2026-09-14T13:14:27 [XSS_PROBE] love-bjuka1.vercel.app param=q
+2026-09-14T13:14:07 [AUTHZ] <URL> allowed by rule '*'
 ```
 
 **Audit log = your lab notebook.** Every action, timestamped. For teaching: have
