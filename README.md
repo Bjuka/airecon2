@@ -16,7 +16,7 @@ the background.
 ## Launch
 
 ```bash
-git clone https://github.com/<you>/airecon2 && cd airecon2
+git clone https://github.com/Bjuka/airecon2 && cd airecon2
 ./airecon2            # Linux/macOS/Git-Bash   (airecon2.bat on Windows)
 ```
 
