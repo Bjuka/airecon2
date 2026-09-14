@@ -11,9 +11,8 @@ the background.
 > and every action is audit-logged. Test only systems you own or have written
 > permission to test. See [GUIDE.md](GUIDE.md).
 
-![airecon2 TUI]("docs\images\tui.png")
+![airecon2 TUI](./docs/images/tui.png)
 
-## Launch
 
 ```bash
 git clone https://github.com/Bjuka/airecon2 && cd airecon2
