@@ -20,7 +20,18 @@ def run_once(prompt: str, provider: str | None = None, mode: str = "recon",
              model: str | None = None, as_json: bool = False) -> int:
     from . import agent
     from . import report as _rep
-    result = agent.run(prompt, provider=provider, model=model, mode=mode, verbose=not as_json)
+    from .llm import LLMError
+    try:
+        result = agent.run(prompt, provider=provider, model=model, mode=mode, verbose=not as_json)
+    except LLMError as e:
+        if as_json:
+            import json as _json
+            print(_json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"  [!] LLM backend problem: {e}")
+            print("      free-tier keys are rate-limited - wait ~1 min and retry,")
+            print("      or switch provider: Settings menu / --provider openrouter|groq|local")
+        return 1
     if as_json:
         import json as _json
         print(_json.dumps(result, ensure_ascii=False, indent=2))
