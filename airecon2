@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# airecon2 launcher (Linux/macOS/Git-Bash): ./airecon2
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$DIR/lib/__main__.py" "$@"

@@ -1,0 +1,7 @@
+# airecon2 has NO Python dependencies - it runs on the pure standard library.
+# This file is intentionally empty.
+#
+# Optional external tooling (not pip packages):
+#   Docker Desktop  - for the Linux pentest lab (nmap, sqlmap, aircrack-ng...)
+#   Ollama          - for the 'local' LLM provider  (https://ollama.com)
+#   usbipd-win      - to pass a USB wifi adapter into the lab for monitor mode

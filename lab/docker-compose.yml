@@ -1,0 +1,19 @@
+services:
+  lab:
+    build: .
+    image: airecon2-lab
+    container_name: airecon2-lab
+    hostname: lab
+    # NET_ADMIN: monitor mode / packet capture; NET_RAW: scanning tools
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    network_mode: bridge
+    volumes:
+      - ../workspace:/workspace   # results land on the host D: drive
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+# To attach a USB wifi adapter (monitor mode):
+#   Windows: usbipd wsl attach --busid <BUSID>  (from an admin prompt)
+#   then:    docker compose exec lab bash  ->  iw dev  /  airmon-ng start wlan0
