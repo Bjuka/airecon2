@@ -7,11 +7,13 @@ from .banner import show_banner, menu_box, info, warn, err, action
 from .config import PROVIDERS, MODELS, get_keys, load_config, _load_env_file, ENV_FILE
 from .llm import LLM, LLMError
 from . import agent, report
+from .profiles import (RECON_MENU, PENTEST_MENU, get_recon_profile,
+                       get_pentest_profile, PENTEST_PROFILES)
 
 
 MAIN_MENU = [
-    ("1", "Recon a target (guided)"),
-    ("2", "Pentest a target (guided, offensive tools)"),
+    ("1", "Recon a target (guided profiles)"),
+    ("2", "Pentest a target (engagement profiles)"),
     ("3", "Free prompt (AI picks the tools)"),
     ("4", "Settings (provider, keys, permissions)"),
     ("5", "Lab status / start Docker lab"),
@@ -24,6 +26,8 @@ HELP_TEXT = """
   REPL commands (type at the airecon2 > prompt):
     recon <target>       quick recon run
     pentest <target>     offensive run (all tools)
+    recon <n> <target>   guided recon profile (1-4) - menu 1
+    pentest <n> <target> engagement profile (1-14) - menu 2
     scan <target>        alias of recon
     crack <url>          login brute-force focus (saves creds)
     report | creds       view saved files
@@ -248,11 +252,132 @@ def _finish_run(result: dict, mode: str, target: str):
         info(f"cracked credentials saved to: {creds_path}")
 
 
-def do_run(mode: str):
+def _maybe_start_lab(profile: dict) -> bool:
+    """Warn + offer lab start when a profile needs it. True = proceed anyway."""
+    if not profile.get("needs_lab"):
+        return True
+    from .offsec import lab
+    if lab.lab_available():
+        return True
+    warn("this profile needs the Linux lab (nmap, dig, tcpdump...) which is not running")
+    if not _ask("start the lab now? (y/n)", "y").startswith("y"):
+        info("continuing anyway - lab tools will report errors")
+        return True
+    action("docker compose up -d --build...")
+    try:
+        p = subprocess.run(["docker", "compose", "up", "-d", "--build"],
+                           cwd=str(ENV_FILE.parent / "lab"),
+                           capture_output=True, text=True, timeout=1800)
+    except FileNotFoundError:
+        err("docker not found - install Docker Desktop")
+        return False
+    if p.returncode == 0:
+        info("lab is up")
+        return True
+    err((p.stderr or "docker compose failed")[-400:])
+    return False
+
+
+def _run_profile(profile: dict, target: str) -> dict | None:
+    """Execute a guided profile against a target. Returns result or None on abort."""
+    if not _maybe_start_lab(profile):
+        return None
+    prompt = profile["prompt"].format(target=target)
+    if profile.get("notes_prompt"):
+        asked = _ask(profile["notes_prompt"] + " (optional)")
+        if asked:
+            prompt += f"\nUser-provided context: {asked}"
+    action(f"running profile '{profile['label']}' against {target}  (ctrl+C aborts)\n")
+    try:
+        return agent.run(prompt, mode=profile.get("mode", "pentest"), verbose=True,
+                         allowed_tools=profile.get("tools"),
+                         system_prompt=profile.get("system_prompt"))
+    except KeyboardInterrupt:
+        err("aborted by user")
+        _pause()
+        return None
+    except LLMError as e:
+        err(f"LLM backend problem: {e}")
+        _pause()
+        return None
+
+
+def recon_menu():
+    """Guided recon profiles: quick web, active infrastructure, passive footprinting."""
     show_banner()
     if not _ensure_keys():
         _pause()
         return
+    menu_box("RECON PROFILES", RECON_MENU, "pick a profile number")
+    c = input("  > ").strip().lower()
+    prof = get_recon_profile(c)
+    if not prof:
+        return
+    target = _ask("target (url or host)")
+    if not target:
+        return
+    result = _run_profile(prof, target)
+    if result:
+        _finish_run(result, prof["label"], target)
+    _pause()
+
+
+def pentest_menu():
+    """Pentest engagement profiles: methodology (black/grey/white) + target types."""
+    show_banner()
+    if not _ensure_keys():
+        _pause()
+        return
+    menu_box("PENTEST ENGAGEMENTS", PENTEST_MENU,
+             "1-3 methodology (black/grey/white box)   4-14 target type")
+    c = input("  > ").strip().lower()
+    prof = get_pentest_profile(c)
+    if not prof:
+        return
+    target = _ask("target (url or host)")
+    if not target:
+        return
+    result = _run_profile(prof, target)
+    if result:
+        _finish_run(result, prof["label"], target)
+    _pause()
+
+
+def do_run(mode: str):
+    """Pick a profile first, then the target - falls back to the classic flow."""
+    show_banner()
+    if not _ensure_keys():
+        _pause()
+        return
+    if mode == "recon":
+        menu_box("RECON PROFILES", RECON_MENU, "pick a number, or c for classic recon")
+        c = input("  > ").strip().lower()
+        if c in ("c", "classic", "0"):
+            _do_run_classic(mode)
+            return
+        prof = get_recon_profile(c)
+    else:
+        menu_box("PENTEST ENGAGEMENTS", PENTEST_MENU,
+                 "pick a number (1-3 = black/grey/white box), or c for classic pentest")
+        c = input("  > ").strip().lower()
+        if c in ("c", "classic", "0"):
+            _do_run_classic(mode)
+            return
+        prof = get_pentest_profile(c)
+    if not prof:
+        _pause()
+        return
+    target = _ask("target (url or host)")
+    if not target:
+        return
+    result = _run_profile(prof, target)
+    if result:
+        _finish_run(result, prof["label"], target)
+    _pause()
+
+
+def _do_run_classic(mode: str):
+    """The pre-profiles flow: target + freeform focus, full toolset."""
     if mode == "pentest":
         from .offsec import lab
         if not lab.lab_available():
@@ -310,6 +435,20 @@ def quick_run(mode: str, target: str, crack: bool = False):
     _finish_run(result, "crack" if crack else mode, target)
 
 
+def quick_profile_run(mode: str, profile_key: str, target: str):
+    """REPL form: recon 2 example.com / pentest 7 api.example.com"""
+    if not _ensure_keys():
+        return
+    getter = get_recon_profile if mode == "recon" else get_pentest_profile
+    prof = getter(profile_key)
+    if not prof:
+        err(f"unknown profile '{profile_key}' - see menus 1 (1-4) and 2 (1-14)")
+        return
+    result = _run_profile(prof, target)
+    if result:
+        _finish_run(result, prof["label"], target)
+
+
 def do_free_prompt():
     show_banner()
     if not _ensure_keys():
@@ -345,10 +484,13 @@ def show_files():
         for f in sorted(report.REPORTS_DIR.glob("*.txt"))[-8:]:
             print(f"    {f.name}  ({max(1, f.stat().st_size // 1024)} KB)")
     if report.CREDS_FILE.exists():
-        n = len([l for l in report.CREDS_FILE.read_text(encoding='utf-8').splitlines() if l and not l.startswith('#')])
+        n = len([l for l in report.CREDS_FILE.read_text(encoding='utf-8', errors='replace').splitlines() if l and not l.startswith('#')])
         info(f"credentials  : {report.CREDS_FILE} ({n} entries)")
     else:
         print("    no cracked credentials yet")
+    if getattr(report, 'INTEL_FILE', None) and report.INTEL_FILE.exists():
+        n = len(report.INTEL_FILE.read_text(encoding='utf-8', errors='replace').splitlines())
+        info(f"sensitive intel: {report.INTEL_FILE} ({n} entries: logins, keys, wifi, dumps)")
     _pause()
 
 
@@ -370,18 +512,27 @@ def dispatch(c: str) -> bool:
         show_banner()
         return True
     if low.startswith(("recon ", "scan ")):
-        target = c.split(" ", 1)[1].strip()
-        quick_run("recon", target)
+        rest = c.split(" ", 1)[1].strip()
+        parts = rest.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and get_recon_profile(parts[0]):
+            quick_profile_run("recon", parts[0], parts[1].strip())
+        else:
+            quick_run("recon", rest)
         return True
     if low in ("recon", "scan", "1"):
-        do_run("recon")
+        recon_menu()
         show_banner()
         return True
     if low.startswith("pentest "):
-        quick_run("pentest", c.split(" ", 1)[1].strip())
+        rest = c.split(" ", 1)[1].strip()
+        parts = rest.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and get_pentest_profile(parts[0]):
+            quick_profile_run("pentest", parts[0], parts[1].strip())
+        else:
+            quick_run("pentest", rest)
         return True
     if low == "pentest" or low == "2":
-        do_run("pentest")
+        pentest_menu()
         show_banner()
         return True
     if low.startswith("crack "):

